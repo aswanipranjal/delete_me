@@ -1,0 +1,13 @@
+[project]
+name = "delete-me-papi"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "chardet>=5.2.0",
+    "pillow>=10.4.0",
+    "pypdf>=6.9.2",
+    "rich>=14.3.3",
+    "term-image[full]>=0.7.2",
+]
