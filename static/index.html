@@ -129,56 +129,46 @@
     /* error */
     .error-wrap { padding: 24px 20px; color: #f85149; font-size: 14px; }
 
-    /* done screen */
-    .done-wrap {
+    /* ── Done screen ── */
+    /* header bar reused for done title + buttons */
+    .done-header {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: 48px 32px;
-      text-align: center;
+      justify-content: space-between;
       gap: 16px;
-      height: 100%;
+      flex-wrap: wrap;
     }
-    .done-wrap h2   { font-size: 22px; color: #3fb950; }
-    .done-wrap p    { color: #8b949e; font-size: 14px; max-width: 520px; }
-    .done-wrap .cmd {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 14px 20px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-      font-size: 13px;
-      text-align: left;
-      width: 100%;
-      max-width: 600px;
-      color: #c9d1d9;
-    }
-    .done-wrap .cmd-label { font-size: 12px; color: #8b949e; align-self: flex-start; margin-bottom: -10px; max-width: 600px; width: 100%; }
+    .done-title { display: flex; flex-direction: column; gap: 4px; }
+    .done-title h2 { font-size: 20px; color: #3fb950; margin: 0; }
+    .done-title p  { font-size: 12px; color: #8b949e; margin: 0; }
 
     /* execute buttons */
-    .exec-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-    .btn-trash    { background: #e3b341; color: #000; padding: 10px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: filter .15s; }
-    .btn-perm-del { background: #da3633; color: #fff; padding: 10px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: filter .15s; }
+    .exec-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn-trash    { background: #e3b341; color: #000; padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: filter .15s; }
+    .btn-perm-del { background: #da3633; color: #fff; padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: filter .15s; }
     .btn-trash:hover, .btn-perm-del:hover { filter: brightness(1.15); }
     .btn-trash:disabled, .btn-perm-del:disabled { opacity: .4; cursor: default; }
 
-    /* results list */
-    .exec-results {
-      width: 100%; max-width: 600px; max-height: 280px; overflow-y: auto;
-      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    /* to_delete.txt file list */
+    .delete-list { padding: 0; }
+    .delete-list-empty { padding: 40px 20px; text-align: center; color: #8b949e; font-size: 14px; }
+    .delete-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 9px 20px;
+      border-bottom: 1px solid #21262d;
+      font-size: 13px;
     }
-    .exec-result-row {
-      display: flex; align-items: flex-start; gap: 10px;
-      padding: 8px 14px; border-bottom: 1px solid #21262d; font-size: 12px;
-    }
-    .exec-result-row:last-child { border-bottom: none; }
-    .exec-result-row .icon { flex-shrink: 0; }
-    .exec-result-row .path { flex: 1; color: #c9d1d9; word-break: break-all; }
-    .exec-result-row .err  { color: #f85149; font-size: 11px; margin-top: 2px; }
-    .exec-summary { font-size: 13px; color: #8b949e; }
+    .delete-item:last-child { border-bottom: none; }
+    .delete-item .di-icon { font-size: 15px; flex-shrink: 0; }
+    .delete-item .di-path { flex: 1; color: #c9d1d9; word-break: break-all; font-family: 'SF Mono','Fira Code',monospace; font-size: 12px; }
+    .delete-item .di-name { color: #e6edf3; font-weight: 500; font-size: 13px; }
+    .delete-item.done-row  { opacity: .45; }
+
+    /* exec results overlay inside each row */
+    .exec-summary { font-size: 12px; color: #8b949e; padding: 10px 20px; border-top: 1px solid #30363d; }
     .exec-summary .ok  { color: #3fb950; font-weight: 600; }
     .exec-summary .bad { color: #f85149; font-weight: 600; }
+    .di-status { flex-shrink: 0; font-size: 13px; }
 
     /* ── Actions bar ── */
     .actions {
@@ -227,6 +217,20 @@
     }
 
     .progress-label { font-size: 12px; color: #8b949e; }
+
+    /* resumed banner */
+    .resumed-banner {
+      background: #1f2d3d;
+      border-bottom: 1px solid #1f6feb;
+      padding: 6px 20px;
+      font-size: 12px;
+      color: #79c0ff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .resumed-banner.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -236,6 +240,7 @@
   <span class="progress-label" id="progress-label"></span>
 </header>
 
+<div class="resumed-banner hidden" id="resumed-banner">⏩ Resumed from previous session — continuing where you left off.</div>
 <div class="progress-track">
   <div class="progress-fill" id="progress-fill" style="width:0%"></div>
 </div>
@@ -245,10 +250,11 @@
 <div class="actions"  id="actions"></div>
 
 <script>
-let state   = null;
-let preview = null;
+let state        = null;
+let preview      = null;
 let currentLines = 30;
-let busy = false;
+let busy         = false;
+let resumedShown = false;
 
 // ── Fetch helpers ──────────────────────────────────────────────────
 
@@ -266,6 +272,8 @@ async function sendAction(action) {
   if (busy) return;
   busy = true;
   currentLines = 30;
+  // Dismiss the resumed banner on first deliberate action.
+  document.getElementById('resumed-banner').classList.add('hidden');
   await fetch('/api/action', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -283,7 +291,7 @@ async function showMore() {
 
 async function refresh() {
   await fetchState();
-  if (state.done) { renderDone(); return; }
+  if (state.done) { await renderDone(); return; }
   await fetchPreview(currentLines);
   render();
 }
@@ -293,6 +301,12 @@ async function refresh() {
 function render() {
   if (!state || !state.entry) return;
   const e = state.entry;
+
+  // Resumed banner — show once, dismissed on first action.
+  if (state.resumed && !resumedShown) {
+    resumedShown = true;
+    document.getElementById('resumed-banner').classList.remove('hidden');
+  }
 
   // Breadcrumb
   const crumbs = state.breadcrumb || [];
@@ -409,62 +423,93 @@ function renderActions(e) {
     <button class="btn-quit" onclick="sendAction('quit')">Quit <span class="kbd">q</span></button>`;
 }
 
-function renderDone() {
+async function renderDone() {
   document.getElementById('breadcrumb').textContent = 'Done';
   document.getElementById('progress-label').textContent = '';
   document.getElementById('progress-fill').style.width = '100%';
-  document.getElementById('file-info').innerHTML = '';
   document.getElementById('actions').innerHTML = '';
 
-  document.getElementById('preview').innerHTML = `
-    <div class="done-wrap" id="done-wrap">
-      <h2>✅ Review complete</h2>
-      <p>Marked paths saved to <strong style="color:#e6edf3">to_delete.txt</strong> — choose an action below.</p>
+  // Header bar: title left, buttons right.
+  document.getElementById('file-info').innerHTML = `
+    <div class="done-header">
+      <div class="done-title">
+        <h2>✅ Review complete</h2>
+        <p>Marked paths saved to <strong style="color:#e6edf3">to_delete.txt</strong></p>
+      </div>
       <div class="exec-btns">
         <button class="btn-trash"    id="btn-trash"    onclick="executeDelete('trash')">🗑 Move to Bin</button>
         <button class="btn-perm-del" id="btn-perm-del" onclick="confirmPermanentDelete()">💥 Permanently Delete</button>
       </div>
-      <div id="exec-output"></div>
-    </div>`;
+    </div>
+    <div id="exec-summary-bar"></div>`;
+
+  // Load and render the to_delete.txt paths.
+  try {
+    const r    = await fetch('/api/to-delete-list');
+    const data = await r.json();
+    const paths = data.paths || [];
+
+    if (paths.length === 0) {
+      document.getElementById('preview').innerHTML =
+        `<div class="delete-list-empty">No files marked for deletion.</div>`;
+      return;
+    }
+
+    const rows = paths.map(p => {
+      const name = p.split('/').pop();
+      const icon = /\.[^/]+$/.test(name) ? '📄' : '📁';
+      return `<div class="delete-item" id="di-${btoa(encodeURIComponent(p)).replace(/=/g,'')}">
+        <span class="di-icon">${icon}</span>
+        <div style="flex:1;min-width:0">
+          <div class="di-name">${esc(name)}</div>
+          <div class="di-path">${esc(p)}</div>
+        </div>
+        <span class="di-status" id="ds-${btoa(encodeURIComponent(p)).replace(/=/g,'')}"></span>
+      </div>`;
+    }).join('');
+
+    document.getElementById('preview').innerHTML =
+      `<div class="delete-list">${rows}</div>`;
+  } catch (e) {
+    document.getElementById('preview').innerHTML =
+      `<div class="delete-list-empty" style="color:#f85149">Failed to load to_delete.txt: ${esc(String(e))}</div>`;
+  }
 }
 
 async function executeDelete(mode) {
-  const btnTrash  = document.getElementById('btn-trash');
-  const btnPerm   = document.getElementById('btn-perm-del');
-  const output    = document.getElementById('exec-output');
+  const btnTrash = document.getElementById('btn-trash');
+  const btnPerm  = document.getElementById('btn-perm-del');
+  const summary  = document.getElementById('exec-summary-bar');
 
   btnTrash.disabled = true;
   btnPerm.disabled  = true;
-  output.innerHTML  = `<p style="color:#8b949e;font-size:13px">Working…</p>`;
+  summary.innerHTML = `<span style="font-size:12px;color:#8b949e;margin-left:4px">Working…</span>`;
 
   try {
     const r    = await fetch(`/api/execute-delete?mode=${mode}`);
     const data = await r.json();
-
-    const rows = (data.results || []).map(res => `
-      <div class="exec-result-row">
-        <span class="icon">${res.success ? '✅' : '❌'}</span>
-        <div>
-          <div class="path">${esc(res.path)}</div>
-          ${res.error ? `<div class="err">${esc(res.error)}</div>` : ''}
-        </div>
-      </div>`).join('');
-
     const label = mode === 'permanent' ? 'deleted' : 'moved to bin';
-    output.innerHTML = `
-      <p class="exec-summary">
-        <span class="ok">${data.trashed} ${label}</span>
-        ${data.failed ? ` · <span class="bad">${data.failed} failed</span>` : ''}
-      </p>
-      ${rows ? `<div class="exec-results">${rows}</div>` : ''}`;
 
-    // Re-enable only if there were failures so the user can retry
+    // Update each row's status icon inline.
+    for (const res of (data.results || [])) {
+      const id  = 'ds-' + btoa(encodeURIComponent(res.path)).replace(/=/g, '');
+      const row = document.getElementById('di-' + btoa(encodeURIComponent(res.path)).replace(/=/g, ''));
+      const el  = document.getElementById(id);
+      if (el)  el.textContent = res.success ? '✅' : '❌';
+      if (row && res.success) row.classList.add('done-row');
+    }
+
+    summary.innerHTML = `<span class="exec-summary">
+      <span class="ok">${data.trashed} ${label}</span>
+      ${data.failed ? ` · <span class="bad">${data.failed} failed</span>` : ''}
+    </span>`;
+
     if (data.failed > 0) {
       btnTrash.disabled = false;
       btnPerm.disabled  = false;
     }
   } catch (err) {
-    output.innerHTML = `<p style="color:#f85149;font-size:13px">Error: ${esc(String(err))}</p>`;
+    summary.innerHTML = `<span style="color:#f85149;font-size:12px">Error: ${esc(String(err))}</span>`;
     btnTrash.disabled = false;
     btnPerm.disabled  = false;
   }

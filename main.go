@@ -25,6 +25,7 @@ import (
 var staticFiles embed.FS
 
 const outputFile = "to_delete.txt"
+const sessionFile = "session.json"
 
 var imageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
@@ -77,6 +78,21 @@ type Session struct {
 	ToDelete      []string
 	AlreadyMarked map[string]bool
 	Done          bool
+	Resumed       bool // true if session was restored from session.json
+}
+
+// SavedLevel is the serialisable form of DirLevel stored in session.json.
+type SavedLevel struct {
+	Dir         string `json:"dir"`
+	Index       int    `json:"index"`
+	CurrentName string `json:"currentName"` // name of entry at Index — used for resilient restore
+}
+
+// SavedSession is the full on-disk resume state.
+type SavedSession struct {
+	RootDir string       `json:"rootDir"`
+	SavedAt time.Time    `json:"savedAt"`
+	Stack   []SavedLevel `json:"stack"`
 }
 
 var session *Session
@@ -186,6 +202,98 @@ func appendToDeleteFile(path string) {
 	f.WriteString(path + "\n")
 }
 
+// saveSession writes the current navigation position to session.json.
+// Called after every user action so even a Ctrl+C loses at most one decision.
+func saveSession() {
+	if session == nil {
+		return
+	}
+	saved := SavedSession{
+		RootDir: session.RootDir,
+		SavedAt: time.Now(),
+	}
+	for _, level := range session.Stack {
+		sl := SavedLevel{
+			Dir:   level.Dir,
+			Index: level.Index,
+		}
+		if level.Index < len(level.Entries) {
+			sl.CurrentName = level.Entries[level.Index].Name
+		}
+		saved.Stack = append(saved.Stack, sl)
+	}
+	data, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		return
+	}
+	os.WriteFile(sessionFile, data, 0644)
+}
+
+// deleteSessionFile removes session.json — called when the review finishes naturally.
+func deleteSessionFile() {
+	os.Remove(sessionFile)
+}
+
+// loadAndResumeSession reads session.json and rebuilds the live Session.
+// alreadyMarked is passed in so that already-deleted files are still skipped.
+func loadAndResumeSession(alreadyMarked map[string]bool) (*Session, error) {
+	data, err := os.ReadFile(sessionFile)
+	if err != nil {
+		return nil, fmt.Errorf("no session file found: %w", err)
+	}
+	var saved SavedSession
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return nil, fmt.Errorf("corrupt session file: %w", err)
+	}
+	if len(saved.Stack) == 0 {
+		return nil, fmt.Errorf("session file has an empty stack")
+	}
+
+	var stack []DirLevel
+	for _, sl := range saved.Stack {
+		entries, err := loadDir(sl.Dir, alreadyMarked)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read saved directory %s: %w", sl.Dir, err)
+		}
+
+		idx := sl.Index
+		// Try to locate the saved entry by name first — resilient to additions/deletions.
+		if sl.CurrentName != "" {
+			for i, e := range entries {
+				if e.Name == sl.CurrentName {
+					idx = i
+					break
+				}
+			}
+		}
+		// Clamp so we never go out of bounds.
+		if idx < 0 {
+			idx = 0
+		}
+		if idx > len(entries) {
+			idx = len(entries)
+		}
+
+		stack = append(stack, DirLevel{
+			Dir:     sl.Dir,
+			Entries: entries,
+			Index:   idx,
+		})
+	}
+
+	sess := &Session{
+		RootDir:       saved.RootDir,
+		Stack:         stack,
+		AlreadyMarked: alreadyMarked,
+		Resumed:       true,
+	}
+	// Mark as done if every level is exhausted.
+	if len(stack) == 1 && stack[0].Index >= len(stack[0].Entries) {
+		sess.Done = true
+	}
+	return sess, nil
+}
+
 func readTextLines(path string, maxLines int) (string, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -279,6 +387,7 @@ type StateResponse struct {
 	Progress   Progress `json:"progress"`
 	Breadcrumb []string `json:"breadcrumb"`
 	Done       bool     `json:"done"`
+	Resumed    bool     `json:"resumed"`
 }
 
 type Progress struct {
@@ -323,6 +432,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 		Progress:   progress,
 		Breadcrumb: session.breadcrumb(),
 		Done:       false,
+		Resumed:    session.Resumed,
 	})
 }
 
@@ -468,6 +578,18 @@ func handleAction(w http.ResponseWriter, r *http.Request) {
 
 	case "quit":
 		session.Done = true
+		// Keep session.json on quit so the user can --resume later.
+		saveSession()
+		w.Write([]byte(`{"ok":true}`))
+		return
+	}
+
+	// Save position after every action.
+	if session.Done {
+		// Natural completion — no need to resume, clean up.
+		deleteSessionFile()
+	} else {
+		saveSession()
 	}
 
 	w.Write([]byte(`{"ok":true}`))
@@ -514,6 +636,30 @@ func trashPath(path string) error {
 	default:
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
+}
+
+func handleToDeleteList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	f, err := os.Open(outputFile)
+	if err != nil {
+		// File doesn't exist yet — return empty list.
+		json.NewEncoder(w).Encode(map[string]any{"paths": []string{}})
+		return
+	}
+	defer f.Close()
+
+	var paths []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			paths = append(paths, line)
+		}
+	}
+	if paths == nil {
+		paths = []string{}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"paths": paths})
 }
 
 func handleExecuteDelete(w http.ResponseWriter, r *http.Request) {
@@ -590,55 +736,104 @@ func openBrowser(url string) {
 }
 
 func main() {
-	var dir string
-	if len(os.Args) >= 2 {
-		dir = os.Args[1]
-	} else {
+	// ── Parse args ──────────────────────────────────────────────────
+	var dirArg string
+	resume := false
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--resume", "-resume":
+			resume = true
+		default:
+			if !strings.HasPrefix(arg, "--") {
+				dirArg = arg
+			}
+		}
+	}
+
+	// Default dir: directory containing the binary.
+	exeDir := func() string {
 		exe, err := os.Executable()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error resolving executable path:", err)
 			os.Exit(1)
 		}
-		// Resolve symlinks so we get the real location on disk
 		exe, _ = filepath.EvalSymlinks(exe)
-		dir = filepath.Dir(exe)
+		return filepath.Dir(exe)
 	}
 
-	dir, err := filepath.Abs(dir)
+	if dirArg == "" {
+		dirArg = exeDir()
+	}
+
+	dir, err := filepath.Abs(dirArg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 
+	// ── Build session ────────────────────────────────────────────────
 	alreadyMarked := loadAlreadyMarked()
-	entries, err := loadDir(dir, alreadyMarked)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error reading directory:", err)
-		os.Exit(1)
+
+	if resume {
+		var resumeErr error
+		session, resumeErr = loadAndResumeSession(alreadyMarked)
+		if resumeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not resume session (%v) — starting fresh.\n", resumeErr)
+			resume = false
+		} else if session.RootDir != dir && dirArg != "" {
+			// User passed an explicit dir that contradicts the saved session.
+			absRoot, _ := filepath.Abs(session.RootDir)
+			if absRoot != dir {
+				fmt.Fprintf(os.Stderr,
+					"Error: --resume session is for %s but you specified %s.\n"+
+						"       Run without a directory argument to resume, or omit --resume to start fresh.\n",
+					session.RootDir, dir)
+				os.Exit(1)
+			}
+		}
 	}
 
-	session = &Session{
-		RootDir:       dir,
-		Stack:         []DirLevel{{Dir: dir, Entries: entries, Index: 0}},
-		AlreadyMarked: alreadyMarked,
-	}
-	if len(entries) == 0 {
-		session.Done = true
+	if !resume {
+		// Fresh start — wipe any stale session file.
+		deleteSessionFile()
+
+		entries, err := loadDir(dir, alreadyMarked)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error reading directory:", err)
+			os.Exit(1)
+		}
+		session = &Session{
+			RootDir:       dir,
+			Stack:         []DirLevel{{Dir: dir, Entries: entries, Index: 0}},
+			AlreadyMarked: alreadyMarked,
+		}
+		if len(entries) == 0 {
+			session.Done = true
+		}
 	}
 
+	// ── HTTP server ──────────────────────────────────────────────────
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	http.Handle("/", http.FileServer(http.FS(staticFS)))
 	http.HandleFunc("/api/state", handleState)
 	http.HandleFunc("/api/preview", handlePreview)
 	http.HandleFunc("/api/action", handleAction)
+	http.HandleFunc("/api/to-delete-list", handleToDeleteList)
 	http.HandleFunc("/api/execute-delete", handleExecuteDelete)
 	http.HandleFunc("/file", handleServeFile)
 
 	addr := ":8080"
-	fmt.Printf("Reviewing: %s\n", dir)
-	fmt.Printf("Open: http://localhost%s\n", addr)
+	fmt.Printf("Reviewing:  %s\n", session.RootDir)
+	if session.Resumed {
+		level := session.currentLevel()
+		if level != nil && level.Index < len(level.Entries) {
+			fmt.Printf("Resuming at: %s (item %d/%d)\n",
+				level.Entries[level.Index].Name, level.Index+1, len(level.Entries))
+		}
+	}
+	fmt.Printf("Open:       http://localhost%s\n", addr)
 	if len(alreadyMarked) > 0 {
-		fmt.Printf("Skipping %d already-marked paths\n", len(alreadyMarked))
+		fmt.Printf("Skipping %d already-marked path(s)\n", len(alreadyMarked))
 	}
 
 	go func() {
