@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>File Review</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .breadcrumb { font-size: 13px; color: #8b949e; }
+    .breadcrumb .crumb-current { color: #58a6ff; font-weight: 500; }
+    .breadcrumb .sep { margin: 0 6px; color: #30363d; }
+
+    /* ── Progress bar ── */
+    .progress-track { height: 3px; background: #21262d; flex-shrink: 0; }
+    .progress-fill  { height: 100%; background: #58a6ff; transition: width 0.25s ease; }
+
+    /* ── File info bar ── */
+    .file-info {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 14px 20px;
+      flex-shrink: 0;
+    }
+    .file-name { font-size: 18px; font-weight: 600; color: #e6edf3; word-break: break-all; }
+    .file-meta { margin-top: 4px; display: flex; gap: 14px; font-size: 12px; color: #8b949e; flex-wrap: wrap; }
+    .badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    /* ── Preview area ── */
+    .preview {
+      flex: 1;
+      overflow-y: auto;
+      background: #0d1117;
+      position: relative;
+    }
+
+    /* text / code */
+    .preview pre  { margin: 0; }
+    .preview code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; }
+    .hljs         { background: #0d1117 !important; padding: 20px !important; }
+
+    /* show-more banner */
+    .show-more-bar {
+      padding: 8px 20px;
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      font-size: 12px;
+      color: #8b949e;
+    }
+    .show-more-bar a { color: #58a6ff; cursor: pointer; text-decoration: none; }
+    .show-more-bar a:hover { text-decoration: underline; }
+
+    /* image */
+    .img-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 300px;
+      padding: 24px;
+    }
+    .img-wrap img {
+      max-width: 100%;
+      max-height: 65vh;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.5);
+    }
+
+    /* directory listing */
+    .dir-list    { padding: 8px 0; }
+    .dir-entry   { display: flex; align-items: center; gap: 10px; padding: 7px 20px; }
+    .dir-entry:hover { background: #161b22; }
+    .dir-entry .icon { font-size: 15px; width: 20px; text-align: center; }
+    .dir-entry .name { flex: 1; font-size: 13px; color: #c9d1d9; }
+    .dir-entry .meta { font-size: 11px; color: #8b949e; }
+
+    /* audio */
+    .audio-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      padding: 60px 24px;
+      min-height: 200px;
+    }
+    .audio-wrap .big-icon { font-size: 64px; }
+    audio { width: 100%; max-width: 480px; }
+
+    /* video */
+    .video-wrap { display: flex; justify-content: center; padding: 24px; }
+    video { max-width: 100%; max-height: 65vh; border-radius: 6px; }
+
+    /* binary / unknown */
+    .detail-wrap { padding: 32px 20px; }
+    .detail-row  { display: flex; gap: 16px; margin-bottom: 10px; font-size: 14px; }
+    .detail-lbl  { color: #8b949e; width: 90px; flex-shrink: 0; }
+
+    /* error */
+    .error-wrap { padding: 24px 20px; color: #f85149; font-size: 14px; }
+
+    /* done screen */
+    .done-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 32px;
+      text-align: center;
+      gap: 16px;
+      height: 100%;
+    }
+    .done-wrap h2   { font-size: 22px; color: #3fb950; }
+    .done-wrap p    { color: #8b949e; font-size: 14px; max-width: 520px; }
+    .done-wrap .cmd {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px 20px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      text-align: left;
+      width: 100%;
+      max-width: 600px;
+      color: #c9d1d9;
+    }
+    .done-wrap .cmd-label { font-size: 12px; color: #8b949e; align-self: flex-start; margin-bottom: -10px; max-width: 600px; width: 100%; }
+
+    /* execute buttons */
+    .exec-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .btn-trash    { background: #e3b341; color: #000; padding: 10px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: filter .15s; }
+    .btn-perm-del { background: #da3633; color: #fff; padding: 10px 22px; border-radius: 6px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: filter .15s; }
+    .btn-trash:hover, .btn-perm-del:hover { filter: brightness(1.15); }
+    .btn-trash:disabled, .btn-perm-del:disabled { opacity: .4; cursor: default; }
+
+    /* results list */
+    .exec-results {
+      width: 100%; max-width: 600px; max-height: 280px; overflow-y: auto;
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    }
+    .exec-result-row {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 8px 14px; border-bottom: 1px solid #21262d; font-size: 12px;
+    }
+    .exec-result-row:last-child { border-bottom: none; }
+    .exec-result-row .icon { flex-shrink: 0; }
+    .exec-result-row .path { flex: 1; color: #c9d1d9; word-break: break-all; }
+    .exec-result-row .err  { color: #f85149; font-size: 11px; margin-top: 2px; }
+    .exec-summary { font-size: 13px; color: #8b949e; }
+    .exec-summary .ok  { color: #3fb950; font-weight: 600; }
+    .exec-summary .bad { color: #f85149; font-weight: 600; }
+
+    /* ── Actions bar ── */
+    .actions {
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      padding: 12px 20px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .actions .spacer { flex: 1; }
+
+    button {
+      padding: 8px 18px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: filter .15s;
+    }
+    button:hover  { filter: brightness(1.15); }
+    button:active { filter: brightness(.9); }
+    button:disabled { opacity: .4; cursor: default; }
+
+    .btn-keep   { background: #238636; color: #fff; }
+    .btn-delete { background: #da3633; color: #fff; }
+    .btn-skip   { background: #444c56; color: #c9d1d9; }
+    .btn-enter  { background: #6e40c9; color: #fff; }
+    .btn-back   { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+    .btn-quit   { background: #21262d; color: #8b949e;  border: 1px solid #30363d; }
+
+    .kbd {
+      display: inline-block;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 0 5px;
+      font-size: 10px;
+      color: #8b949e;
+      margin-left: 4px;
+      vertical-align: middle;
+      font-family: monospace;
+    }
+
+    .progress-label { font-size: 12px; color: #8b949e; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb" id="breadcrumb">Loading…</div>
+  <span class="progress-label" id="progress-label"></span>
+</header>
+
+<div class="progress-track">
+  <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+</div>
+
+<div class="file-info" id="file-info"></div>
+<div class="preview"  id="preview"></div>
+<div class="actions"  id="actions"></div>
+
+<script>
+let state   = null;
+let preview = null;
+let currentLines = 30;
+let busy = false;
+
+// ── Fetch helpers ──────────────────────────────────────────────────
+
+async function fetchState() {
+  const r = await fetch('/api/state');
+  state = await r.json();
+}
+
+async function fetchPreview(lines = 30) {
+  const r = await fetch(`/api/preview?lines=${lines}`);
+  preview = await r.json();
+}
+
+async function sendAction(action) {
+  if (busy) return;
+  busy = true;
+  currentLines = 30;
+  await fetch('/api/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  await refresh();
+  busy = false;
+}
+
+async function showMore() {
+  currentLines = 100;
+  await fetchPreview(100);
+  renderPreview();
+}
+
+async function refresh() {
+  await fetchState();
+  if (state.done) { renderDone(); return; }
+  await fetchPreview(currentLines);
+  render();
+}
+
+// ── Renderers ─────────────────────────────────────────────────────
+
+function render() {
+  if (!state || !state.entry) return;
+  const e = state.entry;
+
+  // Breadcrumb
+  const crumbs = state.breadcrumb || [];
+  document.getElementById('breadcrumb').innerHTML = crumbs.map((c, i) =>
+    i === crumbs.length - 1
+      ? `<span class="crumb-current">${esc(c)}</span>`
+      : `${esc(c)}<span class="sep">/</span>`
+  ).join('');
+
+  // Progress
+  const p = state.progress;
+  const pct = p.total ? (p.current / p.total) * 100 : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = `${p.current} / ${p.total}`;
+
+  // File info
+  const kindColors = {
+    image:'#f78166', text:'#79c0ff', pdf:'#ffa657',
+    directory:'#d2a8ff', audio:'#3fb950', video:'#3fb950', binary:'#8b949e',
+  };
+  const color = kindColors[e.kind] || '#c9d1d9';
+  document.getElementById('file-info').innerHTML = `
+    <div class="file-name">${esc(e.name)}</div>
+    <div class="file-meta">
+      <span class="badge" style="background:${color}22;color:${color}">${e.kind}</span>
+      ${!e.isDir ? `<span>${humanSize(e.size)}</span>` : ''}
+      <span>${e.modTime}</span>
+      ${e.ext ? `<span>${esc(e.ext)}</span>` : ''}
+    </div>`;
+
+  renderPreview();
+  renderActions(e);
+}
+
+function renderPreview() {
+  const el = document.getElementById('preview');
+  if (!preview) { el.innerHTML = ''; return; }
+  const e = state.entry;
+
+  switch (preview.kind) {
+    case 'image':
+      el.innerHTML = `<div class="img-wrap">
+        <img src="/file?path=${encParam(e.path)}" alt="${esc(e.name)}" />
+      </div>`;
+      break;
+
+    case 'text':
+    case 'pdf': {
+      const lang = e.ext.replace('.','') || 'plaintext';
+      el.innerHTML = `<pre><code class="language-${lang}">${esc(preview.content)}</code></pre>`;
+      el.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+      if (preview.hasMore) {
+        el.innerHTML += `<div class="show-more-bar">
+          Showing ${currentLines} of ${preview.lines} lines —
+          <a onclick="showMore()">show up to 100</a>
+        </div>`;
+      }
+      break;
+    }
+
+    case 'directory': {
+      const entries = preview.entries || [];
+      if (!entries.length) {
+        el.innerHTML = `<div class="detail-wrap" style="color:#8b949e">Empty directory</div>`;
+      } else {
+        el.innerHTML = `<div class="dir-list">${entries.map(de => `
+          <div class="dir-entry">
+            <span class="icon">${de.isDir ? '📁' : '📄'}</span>
+            <span class="name">${esc(de.name)}</span>
+            <span class="meta">${de.isDir ? '' : humanSize(de.size)}</span>
+          </div>`).join('')}
+        </div>`;
+      }
+      break;
+    }
+
+    case 'audio':
+      el.innerHTML = `<div class="audio-wrap">
+        <div class="big-icon">🎵</div>
+        <audio controls src="/file?path=${encParam(e.path)}"></audio>
+        <span style="font-size:12px;color:#8b949e">${preview.mimeType || ''} · ${preview.sizeStr}</span>
+      </div>`;
+      break;
+
+    case 'video':
+      el.innerHTML = `<div class="video-wrap">
+        <video controls>
+          <source src="/file?path=${encParam(e.path)}" type="${preview.mimeType || ''}">
+        </video>
+      </div>`;
+      break;
+
+    case 'error':
+      el.innerHTML = `<div class="error-wrap">⚠ ${esc(preview.content)}</div>`;
+      break;
+
+    default:
+      el.innerHTML = `<div class="detail-wrap">
+        <div class="detail-row"><span class="detail-lbl">MIME</span><span>${preview.mimeType || 'unknown'}</span></div>
+        <div class="detail-row"><span class="detail-lbl">Size</span><span>${preview.sizeStr}</span></div>
+      </div>`;
+  }
+}
+
+function renderActions(e) {
+  const isDir = e && e.isDir;
+  document.getElementById('actions').innerHTML = `
+    <button class="btn-keep"   onclick="sendAction('keep')">✓ Keep <span class="kbd">k</span></button>
+    <button class="btn-delete" onclick="sendAction('delete')">✗ Delete <span class="kbd">d</span></button>
+    <button class="btn-skip"   onclick="sendAction('skip')">→ Skip <span class="kbd">s</span></button>
+    ${isDir ? `<button class="btn-enter" onclick="sendAction('enter')">↳ Enter <span class="kbd">e</span></button>` : ''}
+    <div class="spacer"></div>
+    <button class="btn-back" onclick="sendAction('back')">↑ Back <span class="kbd">b</span></button>
+    <button class="btn-quit" onclick="sendAction('quit')">Quit <span class="kbd">q</span></button>`;
+}
+
+function renderDone() {
+  document.getElementById('breadcrumb').textContent = 'Done';
+  document.getElementById('progress-label').textContent = '';
+  document.getElementById('progress-fill').style.width = '100%';
+  document.getElementById('file-info').innerHTML = '';
+  document.getElementById('actions').innerHTML = '';
+
+  document.getElementById('preview').innerHTML = `
+    <div class="done-wrap" id="done-wrap">
+      <h2>✅ Review complete</h2>
+      <p>Marked paths saved to <strong style="color:#e6edf3">to_delete.txt</strong> — choose an action below.</p>
+      <div class="exec-btns">
+        <button class="btn-trash"    id="btn-trash"    onclick="executeDelete('trash')">🗑 Move to Bin</button>
+        <button class="btn-perm-del" id="btn-perm-del" onclick="confirmPermanentDelete()">💥 Permanently Delete</button>
+      </div>
+      <div id="exec-output"></div>
+    </div>`;
+}
+
+async function executeDelete(mode) {
+  const btnTrash  = document.getElementById('btn-trash');
+  const btnPerm   = document.getElementById('btn-perm-del');
+  const output    = document.getElementById('exec-output');
+
+  btnTrash.disabled = true;
+  btnPerm.disabled  = true;
+  output.innerHTML  = `<p style="color:#8b949e;font-size:13px">Working…</p>`;
+
+  try {
+    const r    = await fetch(`/api/execute-delete?mode=${mode}`);
+    const data = await r.json();
+
+    const rows = (data.results || []).map(res => `
+      <div class="exec-result-row">
+        <span class="icon">${res.success ? '✅' : '❌'}</span>
+        <div>
+          <div class="path">${esc(res.path)}</div>
+          ${res.error ? `<div class="err">${esc(res.error)}</div>` : ''}
+        </div>
+      </div>`).join('');
+
+    const label = mode === 'permanent' ? 'deleted' : 'moved to bin';
+    output.innerHTML = `
+      <p class="exec-summary">
+        <span class="ok">${data.trashed} ${label}</span>
+        ${data.failed ? ` · <span class="bad">${data.failed} failed</span>` : ''}
+      </p>
+      ${rows ? `<div class="exec-results">${rows}</div>` : ''}`;
+
+    // Re-enable only if there were failures so the user can retry
+    if (data.failed > 0) {
+      btnTrash.disabled = false;
+      btnPerm.disabled  = false;
+    }
+  } catch (err) {
+    output.innerHTML = `<p style="color:#f85149;font-size:13px">Error: ${esc(String(err))}</p>`;
+    btnTrash.disabled = false;
+    btnPerm.disabled  = false;
+  }
+}
+
+function confirmPermanentDelete() {
+  if (confirm('⚠️ Permanently delete all marked files? This cannot be undone.')) {
+    executeDelete('permanent');
+  }
+}
+
+// ── Utilities ──────────────────────────────────────────────────────
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function encParam(s) {
+  return encodeURIComponent(s);
+}
+
+function humanSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  const units = ['KB','MB','GB','TB'];
+  let size = bytes, i = -1;
+  do { size /= 1024; i++; } while (size >= 1024 && i < units.length - 1);
+  return size.toFixed(1) + ' ' + units[i];
+}
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────
+
+document.addEventListener('keydown', ev => {
+  if (busy || !state || state.done) return;
+  if (['INPUT','TEXTAREA'].includes(ev.target.tagName)) return;
+  const map = {
+    k: 'keep', d: 'delete', s: 'skip', q: 'quit', b: 'back',
+    e: () => state.entry?.isDir && sendAction('enter'),
+    x: () => preview?.hasMore && showMore(),
+  };
+  const handler = map[ev.key];
+  if (!handler) return;
+  ev.preventDefault();
+  typeof handler === 'function' ? handler() : sendAction(handler);
+});
+
+// ── Boot ───────────────────────────────────────────────────────────
+refresh();
+</script>
+</body>
+</html>
